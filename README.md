@@ -1,4 +1,4 @@
-﻿# Java Decompiler Script
+# Java Decompiler Script
 
 Cross-platform PowerShell launcher for FernFlower Java decompiler with configuration management.
 
@@ -8,21 +8,28 @@ Cross-platform PowerShell launcher for FernFlower Java decompiler with configura
 - **IntelliJ IDEA integration**: Automatically finds java-decompiler.jar in IntelliJ installation
 - **Configuration management**: Save and reuse decompiler paths and settings
 - **Flexible usage**: Command-line parameters or interactive configuration
+- **SameDir convenience**: Automatically place output files next to input files
 - **Comprehensive testing**: All functions validated with real JAR files
 
 ## Usage
 
 ### Basic Decompilation
-`powershell
+
+```powershell
 # Decompile a single .class file
 .\decompiler.ps1 -input MyClass.class -out MyClass.java
 
 # Decompile entire JAR to directory
 .\decompiler.ps1 -input myapp.jar -dir output/
-`
+
+# Place output in same directory as input (convenient!)
+.\decompiler.ps1 -input myapp.jar -SameDir
+.\decompiler.ps1 -input MyClass.class -s
+```
 
 ### Configuration Management
-`powershell
+
+```powershell
 # Set IntelliJ IDEA path
 .\decompiler.ps1 -SetConfig -i "C:\Program Files\JetBrains\IntelliJ IDEA 2025.1.3"
 
@@ -34,16 +41,36 @@ Cross-platform PowerShell launcher for FernFlower Java decompiler with configura
 
 # Clear configuration
 .\decompiler.ps1 -ClearConfig
-`
-
-### Advanced Usage
-`powershell
-# With extra decompiler arguments
-.\decompiler.ps1 -input app.jar -dir output/ -ExtraArgs "-dgs=1 -rsy=1"
 
 # Interactive configuration mode
 .\decompiler.ps1 -SetConfig
-`
+```
+
+### Advanced Usage
+
+```powershell
+# With additional decompiler arguments
+.\decompiler.ps1 -input app.jar -dir output/ -- -dgs=1 -rsy=1
+
+# Use short parameter aliases
+.\decompiler.ps1 -i app.jar -dir out/ -s
+```
+
+## Parameters
+
+| Parameter | Alias | Description |
+|-----------|-------|-------------|
+| `-InputFile` | `-input` | Input file to decompile (.class, .jar, .zip, .war, .ear) |
+| `-OutputFile` | `-out` | Output file path (.java) - for single class files |
+| `-OutputDir` | `-dir` | Output directory for decompiled files |
+| `-SameDir` | `-s` | Place output files in the same directory as input file |
+| `-IdeaPath` | `-i` | Path to IntelliJ IDEA installation |
+| `-DecompilerPath` | `-d` | Direct path to java-decompiler.jar |
+| `-SetConfig` | | Set configuration values |
+| `-GetConfig` | | Show current configuration |
+| `-ClearConfig` | | Clear entire configuration |
+| `-RemoveConfig` | | Remove config entries interactively |
+| `-Help` | `-h` | Show help message |
 
 ## Requirements
 
