@@ -49,14 +49,6 @@ Config Management:
   -ClearConfig         Clear entire configuration
   -GetConfig           Show current configuration
 
-Output Handling:
-  For .class files: 
-    -OutputFile specifies the exact output .java file
-    -OutputDir specifies the directory for the output file
-  For .jar/.zip files:
-    -OutputFile is ignored
-    -OutputDir specifies the directory for decompiled files
-
 Examples:
   # Decompile single class
   .\decompiler.ps1 -input input.class -out output.java
@@ -124,21 +116,18 @@ function Edit-Config {
     $config = Read-Config
     $updated = $false
     
-    # Set IdeaPath if provided
     if ($IdeaPathValue) {
         $config["IdeaPath"] = $IdeaPathValue
         Write-Host "Config updated: IdeaPath=$IdeaPathValue"
         $updated = $true
     }
     
-    # Set DecompilerPath if provided
     if ($DecompilerPathValue) {
         $config["DecompilerPath"] = $DecompilerPathValue
         Write-Host "Config updated: DecompilerPath=$DecompilerPathValue"
         $updated = $true
     }
     
-    # If no parameters provided, fall back to interactive mode
     if (-not $updated) {
         $key = Read-Host "Enter config key to set (e.g. 'dgs')"
         $value = Read-Host "Enter value for '$key' (current: '$($config[$key])')"
@@ -247,14 +236,14 @@ try {
 $config = Read-Config
 
 # Use config values as defaults if parameters not provided
-if (-not $IdeaPath -and $config.ContainsKey("IdeaPath")) {
+if ((-not $IdeaPath) -and $config.ContainsKey("IdeaPath")) {
     $IdeaPath = $config["IdeaPath"]
 }
-if (-not $DecompilerPath -and $config.ContainsKey("DecompilerPath")) {
+if ((-not $DecompilerPath) -and $config.ContainsKey("DecompilerPath")) {
     $DecompilerPath = $config["DecompilerPath"]
 }
 
-if (-not $IdeaPath -and -not $DecompilerPath) {
+if ((-not $IdeaPath) -and (-not $DecompilerPath)) {
     Write-Error "You must specify either -IdeaPath or -DecompilerPath (or set in config)"
     Show-Help
     exit 1
@@ -280,46 +269,37 @@ if (-not (Test-Path $jarPath)) {
     exit 1
 }
 
-# Determine output handling based on input type
-$inputExtension = [IO.Path]::GetExtension($InputFile).ToLower()
-$isArchive = @(".jar", ".zip", ".war", ".ear") -contains $inputExtension
+# Determine destination path
+$destPath = ""
+$needsFileRename = $false
+$originalOutputFile = $OutputFile
 
-# Handle -SameDir flag first
 if ($SameDir) {
     $inputDir = [IO.Path]::GetDirectoryName($InputFile)
     if (-not $inputDir) { $inputDir = "." }
     
-    if ($isArchive) {
-        $OutputDir = $inputDir
-        $destPath = $OutputDir
-    } else {
-        # For .class files, set both OutputDir and OutputFile
-        $OutputDir = $inputDir
-        if (-not $OutputFile) {
-            $inputBaseName = [IO.Path]::GetFileNameWithoutExtension($InputFile)
-            $OutputFile = "$inputBaseName.java"
-        }
-        $destPath = $OutputDir
-    }
+    # For SameDir, create a subdirectory to avoid overwriting the original file
+    $inputBaseName = [IO.Path]::GetFileNameWithoutExtension($InputFile)
+    $decompiledDir = Join-Path $inputDir "${inputBaseName}_decompiled"
+    $destPath = $decompiledDir
+}
+elseif ($OutputFile) {
+    # FernFlower can't specify output filename, only directory
+    # Create temp directory and we'll rename the result later
+    $outputDir = [IO.Path]::GetDirectoryName($OutputFile)
+    if (-not $outputDir) { $outputDir = "." }
+    
+    $tempDirName = "temp_decompile_$(Get-Random)"
+    $destPath = Join-Path $outputDir $tempDirName
+    $needsFileRename = $true
+}
+elseif ($OutputDir) {
+    # Direct output to specified directory
+    $destPath = $OutputDir
 }
 else {
-    # FernFlower always expects a destination directory, not a file
-    if ($isArchive) {
-        # For archives, use OutputDir directly
-        if (-not $OutputDir) {
-            $OutputDir = "."
-        }
-        $destPath = $OutputDir
-    }
-    else {
-        # For single files (.class), we need to create a temp directory
-        # and then move/rename the result if OutputFile is specified
-        if ($OutputDir) {
-            $destPath = $OutputDir
-        } else {
-            $destPath = "."
-        }
-    }
+    # Default to current directory
+    $destPath = "."
 }
 
 # Create destination directory if needed
@@ -346,6 +326,9 @@ try {
     
     # Build command arguments properly
     $javaArgs = @(
+        "-Xmx2G",  # Увеличиваем память для больших JAR файлов
+        "-Djava.util.zip.disableZip64ExtraFieldValidation=true",  # Отключаем валидацию ZIP64
+        "-Djdk.util.zip.disableZip64ExtraFieldValidation=true",   # Для новых версий Java
         "-cp", $jarPath,
         "org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler"
     )
@@ -356,64 +339,59 @@ try {
     }
     
     # Add input and output
+    # $javaArgs += @($InputFile, $destPath)
     $javaArgs += @($InputFile, $destPath)
     
     Write-Host "Command: java $($javaArgs -join ' ')"
-    Write-Host "Working directory: $(Get-Location)"
-    Write-Host "Jar exists: $(Test-Path $jarPath)"
-    Write-Host "Input exists: $(Test-Path $InputFile)"
-    Write-Host "Destination dir: $destPath"
     
-    # Execute with proper argument handling
-    try {
-        $output = & java @javaArgs 2>&1
-        $exitCode = $LASTEXITCODE
-        
-        if ($exitCode -ne 0) {
-            Write-Host "Process output:"
-            $output | ForEach-Object { Write-Host $_ }
-            Write-Error "Decompilation failed with exit code $exitCode"
-            exit $exitCode
+    # Execute decompiler
+    $output = & java @javaArgs 2>&1
+    $exitCode = $LASTEXITCODE
+    
+    if ($output) {
+        # Filter out repetitive ZIP validation errors but show other messages
+        $zipErrorCount = 0
+        $output | ForEach-Object { 
+            if ($_ -match "zip END header not found|ZipException") {
+                $zipErrorCount++
+                if ($zipErrorCount -le 5 -or ($zipErrorCount % 50) -eq 0) {
+                    Write-Host $_ -ForegroundColor DarkGray
+                }
+            } else {
+                Write-Host $_
+            }
         }
         
-        # Show output for debugging
-        if ($output) {
-            $output | ForEach-Object { Write-Host $_ }
+        if ($zipErrorCount -gt 5) {
+            Write-Host "... and $($zipErrorCount - 5) more ZIP validation warnings (this is normal for some JAR files)" -ForegroundColor DarkGray
         }
-        
-    } catch {
-        Write-Error "Execution error: $_"
-        exit 1
+    }
+    
+    if ($exitCode -ne 0) {
+        Write-Error "Decompilation failed with exit code $exitCode"
+        exit $exitCode
     }
     
     Write-Host "Decompilation completed successfully"
     
-    # Handle result for single class files
-    if (-not $isArchive -and $OutputFile) {
-        # Find the decompiled .java file and rename it
+    # Handle file renaming if needed
+    if ($needsFileRename -and $originalOutputFile) {
+        # Find the decompiled file and rename it
         $inputBaseName = [IO.Path]::GetFileNameWithoutExtension($InputFile)
-        $decompiled = Get-ChildItem -Path $destPath -Filter "*.java" | Where-Object { $_.BaseName -eq $inputBaseName }
+        $decompiledFiles = Get-ChildItem -Path $destPath -Filter "*.java" | Where-Object { $_.BaseName -eq $inputBaseName }
         
-        if ($decompiled) {
-            $targetPath = if ($OutputDir) { Join-Path $OutputDir $OutputFile } else { $OutputFile }
-            Move-Item $decompiled.FullName $targetPath -Force
-            Write-Host "Created output file: $targetPath"
+        if ($decompiledFiles) {
+            $outputDir = [IO.Path]::GetDirectoryName($originalOutputFile)
+            if (-not $outputDir) { $outputDir = "." }
+            $finalOutputPath = Join-Path $outputDir ([IO.Path]::GetFileName($originalOutputFile))
+            
+            Move-Item $decompiledFiles[0].FullName $finalOutputPath -Force
+            Write-Host "Created output file: $finalOutputPath"
+            
+            # Clean up temporary directory
+            Remove-Item $destPath -Recurse -Force -ErrorAction SilentlyContinue
         } else {
             Write-Warning "Could not find decompiled file for $inputBaseName"
-        }
-    }
-    
-    # Show result info
-    if ($isArchive) {
-        $decompiled = Get-ChildItem -Path $destPath -Recurse -File -ErrorAction SilentlyContinue
-        Write-Host "Decompiled $($decompiled.Count) files to directory: $destPath"
-    } else {
-        if (-not $OutputFile) {
-            # Show files created in destination
-            $decompiled = Get-ChildItem -Path $destPath -Filter "*.java" -ErrorAction SilentlyContinue
-            if ($decompiled) {
-                Write-Host "Created files in $destPath`: $($decompiled.Name -join ', ')"
-            }
         }
     }
 }
