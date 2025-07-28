@@ -1,0 +1,18 @@
+﻿# Configuration file
+config.txt
+
+# Test files
+*.class
+*.jar
+test*/
+output*/
+decompiled*/
+
+# PowerShell specific
+*.ps1xml
+
+# IDE files
+.vscode/
+.idea/
+*.suo
+*.user
