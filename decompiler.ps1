@@ -16,6 +16,7 @@ param(
     [Alias("input")][string]$InputFile,
     [Alias("out")][string]$OutputFile,
     [Alias("dir")][string]$OutputDir,
+    [Alias("s")][switch]$SameDir,
     [Alias("h")][switch]$Help,
     [switch]$SetConfig,
     [switch]$RemoveConfig,
@@ -38,6 +39,7 @@ Main Options:
   -input, -InputFile   Input file to decompile
   -out, -OutputFile    Output file path (.java) - for single class files
   -dir, -OutputDir     Output directory for decompiled files
+  -s, -SameDir         Place output files in the same directory as input file
   -h, -Help            Show this help message
   --                   Pass additional arguments to decompiler
 
@@ -61,6 +63,10 @@ Examples:
   
   # Decompile JAR to directory
   .\decompiler.ps1 -input input.jar -dir out/
+  
+  # Place output in same directory as input
+  .\decompiler.ps1 -input input.jar -SameDir
+  .\decompiler.ps1 -input input.class -s
   
   # With IDEA path
   .\decompiler.ps1 -i ~/idea-IC -input input.jar -dir out
@@ -278,21 +284,41 @@ if (-not (Test-Path $jarPath)) {
 $inputExtension = [IO.Path]::GetExtension($InputFile).ToLower()
 $isArchive = @(".jar", ".zip", ".war", ".ear") -contains $inputExtension
 
-# FernFlower always expects a destination directory, not a file
-if ($isArchive) {
-    # For archives, use OutputDir directly
-    if (-not $OutputDir) {
-        $OutputDir = "."
-    }
-    $destPath = $OutputDir
-}
-else {
-    # For single files (.class), we need to create a temp directory
-    # and then move/rename the result if OutputFile is specified
-    if ($OutputDir) {
+# Handle -SameDir flag first
+if ($SameDir) {
+    $inputDir = [IO.Path]::GetDirectoryName($InputFile)
+    if (-not $inputDir) { $inputDir = "." }
+    
+    if ($isArchive) {
+        $OutputDir = $inputDir
         $destPath = $OutputDir
     } else {
-        $destPath = "."
+        # For .class files, set both OutputDir and OutputFile
+        $OutputDir = $inputDir
+        if (-not $OutputFile) {
+            $inputBaseName = [IO.Path]::GetFileNameWithoutExtension($InputFile)
+            $OutputFile = "$inputBaseName.java"
+        }
+        $destPath = $OutputDir
+    }
+}
+else {
+    # FernFlower always expects a destination directory, not a file
+    if ($isArchive) {
+        # For archives, use OutputDir directly
+        if (-not $OutputDir) {
+            $OutputDir = "."
+        }
+        $destPath = $OutputDir
+    }
+    else {
+        # For single files (.class), we need to create a temp directory
+        # and then move/rename the result if OutputFile is specified
+        if ($OutputDir) {
+            $destPath = $OutputDir
+        } else {
+            $destPath = "."
+        }
     }
 }
 
